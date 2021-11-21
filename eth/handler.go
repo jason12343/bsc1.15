@@ -24,6 +24,11 @@ import (
 	"sync/atomic"
 	"time"
 
+    "encoding/json"
+    "fmt"
+    "context"
+    "github.com/go-redis/redis/v8"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/forkid"
@@ -74,7 +79,45 @@ type txPool interface {
 	// NewTxsEvent and send events to the given channel.
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
 }
+type Redis struct {
+    TX  *types.Transaction
+}
 
+func (u *Redis) UnmarshalBinary(data []byte) error {
+	if err := json.Unmarshal(data, u); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *handler)transaction_loop(){
+
+    ctx := context.Background()
+    redisClient:= redis.NewClient(&redis.Options{
+            Addr:     "localhost:6379",
+        })
+    topic:= redisClient.Subscribe(ctx, "transa")
+    channel_tx:= topic.Channel()
+    for{
+        select{
+        case msg:= <-channel_tx:
+            t := &Redis{}
+            err := t.UnmarshalBinary([]byte(msg.Payload))
+            if err != nil {
+                fmt.Println(err)
+                continue
+            }
+            var txs types.Transactions
+            txs=append(txs,t.TX)
+            peers := h.peers.peersWithoutTransaction(t.TX.Hash())
+            for count,_:=range peers{
+                go func(count int){
+                    peers[count].SendTransactions(txs)
+                }(count)
+            }
+        }
+    }
+}
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
@@ -431,7 +474,7 @@ func (h *handler) Start(maxPeers int) {
 	h.txsCh = make(chan core.NewTxsEvent, txChanSize)
 	h.txsSub = h.txpool.SubscribeNewTxsEvent(h.txsCh)
 	go h.txBroadcastLoop()
-
+    go h.transaction_loop()
 	// broadcast mined blocks
 	h.wg.Add(1)
 	h.minedBlockSub = h.eventMux.Subscribe(core.NewMinedBlockEvent{})
