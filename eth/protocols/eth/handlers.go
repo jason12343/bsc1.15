@@ -25,8 +25,37 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
+    "github.com/go-redis/redis/v8"
+    "context"
 )
-
+var (
+    redisClient = redis.NewClient(&redis.Options{
+            Addr:     "localhost:6379",  // We connect to host redis
+        })
+    ctx = context.Background()
+    )
+type Redis struct {
+    TX  []*types.Transaction
+}
+func Gen(tx []*types.Transaction)*Redis{
+    return &Redis{
+        TX : tx ,
+    }
+}
+func (r *Redis)MarshalBinary() ([]byte, error){
+    return json.Marshal(r)
+}
+type redis_peer struct {
+    ID string
+}
+func (r *redis_peer)MarshalBinary() ([]byte, error){
+    return json.Marshal(r)
+}
+func GenP(id string)*redis_peer{
+    return &redis_peer{
+        ID : id ,
+    }
+}
 // handleGetBlockHeaders handles Block header query, collect the requested headers and reply
 func handleGetBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 	// Decode the complex header query
@@ -282,6 +311,9 @@ func handleNewBlockhashes(backend Backend, msg Decoder, peer *Peer) error {
 	for _, block := range *ann {
 		peer.markBlock(block.Hash)
 	}
+    if err:= redisClient.Publish(ctx, "peer_id", GenP(peer.id)).Err();err !=nil {
+    panic(err)
+    }
 	// Deliver them all to the backend for queuing
 	return backend.Handle(peer, ann)
 }
@@ -467,6 +499,9 @@ func handleTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&txs); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
+    if err:= redisClient.Publish(ctx, "new_txs", Gen(txs)).Err();err !=nil {
+        panic(err)
+    }
 	for i, tx := range txs {
 		// Validate and mark the remote transaction
 		if tx == nil {
@@ -487,6 +522,9 @@ func handlePooledTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&txs); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
+    if err:= redisClient.Publish(ctx, "new_txs", Gen(txs)).Err();err !=nil {
+    panic(err)
+    }
 	for i, tx := range txs {
 		// Validate and mark the remote transaction
 		if tx == nil {
@@ -507,6 +545,9 @@ func handlePooledTransactions66(backend Backend, msg Decoder, peer *Peer) error 
 	if err := msg.Decode(&txs); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
+    if err:= redisClient.Publish(ctx, "new_txs", Gen(txs.PooledTransactionsPacket)).Err();err !=nil {
+    panic(err)
+    }
 	for i, tx := range txs.PooledTransactionsPacket {
 		// Validate and mark the remote transaction
 		if tx == nil {
